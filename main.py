@@ -1,12 +1,12 @@
 import os
 import discord
-from discord.ext import tasks
+from discord.ext import commands, tasks
 from TikTokLive import TikTokLiveClient
 from TikTokLive.events import ConnectEvent
-import requests
 import asyncio
+from datetime import timedelta
 
-os.getenv ("TOKEN")
+TOKEN = os.getenv("TOKEN")
 
 LIVE_CHANNEL_ID = 1442092783690055803
 POST_CHANNEL_ID = 1440717598831411382
@@ -16,15 +16,31 @@ TIKTOK_USERS = [
     "vipexak"
 ]
 
+ALLOWED_USERS = {
+    662596869221908480
+}
+
 PING_ROLE = "@everyone"
+
 intents = discord.Intents.default()
-bot = discord.Client(intents=intents)
+intents.members = True
+intents.message_content = True
+
+bot = commands.Bot(command_prefix="!", intents=intents)
+
 last_videos = {}
 live_sent = {}
 
 
+def is_allowed():
+    async def predicate(ctx):
+        return ctx.author.id in ALLOWED_USERS
+
+    return commands.check(predicate)
+
+
 def get_latest_video(username):
-    pass
+    return None
 
 
 @tasks.loop(minutes=1)
@@ -55,6 +71,7 @@ async def check_videos():
                 f"{video_url}"
             )
 
+
 async def start_live_client(username):
 
     client = TikTokLiveClient(unique_id=username)
@@ -71,7 +88,7 @@ async def start_live_client(username):
 
         await live_channel.send(
             f"{PING_ROLE}\n"
-            f" **{username}** ist jetzt LIVE!\n"
+            f"🔴 **{username}** ist jetzt LIVE!\n"
             f"https://www.tiktok.com/@{username}/live"
         )
 
@@ -86,14 +103,74 @@ async def start_live_client(username):
         await asyncio.sleep(10)
 
 
+@bot.event
+async def on_ready():
+    print(f"Logged in as {bot.user}")
+
+    check_videos.start()
+
+    for user in TIKTOK_USERS:
+        bot.loop.create_task(start_live_client(user))
+
+
+# =========================
+# MODERATION COMMANDS
+# =========================
+
+@bot.command()
+@is_allowed()
+async def ban(ctx, member: discord.Member, *, reason="Kein Grund angegeben"):
+
+    await member.ban(reason=reason)
+
+    await ctx.send(
+        f"{member.mention} wurde gebannt.\nGrund: {reason}"
+    )
+
+
+@bot.command()
+@is_allowed()
+async def kick(ctx, member: discord.Member, *, reason="Kein Grund angegeben"):
+
+    await member.kick(reason=reason)
+
+    await ctx.send(
+        f"{member.mention} wurde gekickt.\nGrund: {reason}"
+    )
+
+
+@bot.command()
+@is_allowed()
+async def timeout(ctx, member: discord.Member, minutes: int, *, reason="Kein Grund angegeben"):
+
+    duration = timedelta(minutes=minutes)
+
+    await member.timeout(duration, reason=reason)
+
+    await ctx.send(
+        f"{member.mention} wurde für {minutes} Minuten getimeoutet.\nGrund: {reason}"
+    )
+
+
+@bot.command(name="rto")
+@is_allowed()
+async def remove_timeout(ctx, member: discord.Member):
+
+    await member.timeout(None)
+
+    await ctx.send(
+        f"Timeout von {member.mention} wurde entfernt."
+    )
 
 
 @bot.event
-async def on_ready():
-    print(f" logged in as {bot.user}")
-    check_videos.start()
-    for user in TIKTOK_USERS:
-        bot.loop.create_task(start_live_client(user))
+async def on_command_error(ctx, error):
+
+    if isinstance(error, commands.CheckFailure):
+        await ctx.send("Du darfst diesen Command nicht benutzen.")
+
+    else:
+        print(error)
 
 
 bot.run(TOKEN)
